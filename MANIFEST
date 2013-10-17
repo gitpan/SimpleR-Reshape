@@ -1,0 +1,15 @@
+LICENSE
+MANIFEST
+META.yml
+Makefile.PL
+README
+README.pod
+dist.ini
+lib/SimpleR/Reshape.pm
+xt/01.read_table.csv
+xt/01.read_table.t
+xt/02.melt.csv
+xt/02.melt.t
+xt/03.cast.csv
+xt/03.cast.t
+xt/reshape_src.csv
