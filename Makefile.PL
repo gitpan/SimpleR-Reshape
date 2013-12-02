@@ -9,7 +9,7 @@ use ExtUtils::MakeMaker 6.30;
 
 
 my %WriteMakefileArgs = (
-  "ABSTRACT" => "\346\225\260\346\215\256\345\244\204\347\220\206\350\275\254\346\215\242",
+  "ABSTRACT" => "Reshape like R\r",
   "AUTHOR" => "abbypan <abbypan\@gmail.com>",
   "BUILD_REQUIRES" => {},
   "CONFIGURE_REQUIRES" => {
@@ -21,7 +21,7 @@ my %WriteMakefileArgs = (
   "NAME" => "SimpleR::Reshape",
   "PREREQ_PM" => {},
   "TEST_REQUIRES" => {},
-  "VERSION" => "0.01",
+  "VERSION" => "0.02",
   "test" => {
     "TESTS" => ""
   }

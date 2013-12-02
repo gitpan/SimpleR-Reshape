@@ -12,4 +12,7 @@ xt/02.melt.csv
 xt/02.melt.t
 xt/03.cast.csv
 xt/03.cast.t
+xt/04.merge.t
+xt/05.write_table.t
 xt/reshape_src.csv
+xt/write_table.csv
