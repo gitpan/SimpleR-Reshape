@@ -1,29 +1,98 @@
 # ABSTRACT: Reshape like R
+=pod
+Read Me: L<SimpleR-Reshape|https://github.com/abbypan/SimpleR-Reshape>
+=cut
 package SimpleR::Reshape;
 
 require Exporter;
 @ISA    = qw(Exporter);
-@EXPORT = qw(read_table write_table melt cast merge);
+@EXPORT = qw(read_table write_table melt cast merge split_file);
 
-our $VERSION     = 0.03;
+our $VERSION     = 0.04;
 our $DEFAULT_SEP = ',';
 
+sub get_id_array_value {
+    my ($id, $arr) = @_;
+    ref($id) ne 'ARRAY' ?  $id :
+    $arr ?  @{$arr}[ @$id ] : @$id;
+}
+
+
+sub split_file {
+    my ($f, %opt) = @_;
+    $opt{split_filename} ||= $f;
+    $opt{return_arrayref} //= 0;
+    $opt{sep} //= $DEFAULT_SEP;
+
+    return split_file_line($f, %opt) if(exists $opt{line_cnt});
+
+    my %exist_fh;
+
+    $opt{conv_sub} = sub {
+        my ($r) = @_;
+        return unless($r);
+
+        my $k = join($opt{sep}, get_id_array_value($opt{id}, $r));
+        $k=~s#[\\\/,]#-#g;
+
+        if(! exists $exist_fh{$k}){
+            my $file = "$opt{split_filename}.$k";
+            open $exist_fh{$k}, '>', $file;
+        }
+
+        my $fhw = $exist_fh{$k};
+        print $fhw join($opt{sep}, @$r), "\n";
+
+        return;
+    };
+
+    read_table($f, %opt);
+}
+
+sub split_file_line {
+    my ($file, %opt) = @_;
+    $opt{split_filename} ||= $file;
+
+    open my $fh,'<', $file;
+    my $i=0;
+    my $file_i = 1;
+    my $fhw;
+    while(<$fh>){
+        if($i==0){
+            open $fhw,'>', "$opt{split_filename}.$file_i";
+        }
+        print $fhw $_;
+        $i++;
+        if($i==$opt{line_cnt}){
+            $i=0;
+            $file_i++;
+        }
+    }
+    close $fh;
+}
 
 sub read_table {
     my ( $txt, %opt ) = @_;
 
     $opt{sep}             //= $DEFAULT_SEP;
     $opt{skip_head}       //= 0;
-    $opt{return_arrayref} //= 1;
     $opt{write_sub} = gen_sub_write_row( $opt{write_filename}, %opt )
       if ( exists $opt{write_filename} );
+    $opt{return_arrayref} //= exists $opt{write_filename} ? 0 : 1;
+
 
     my @data;
+
+    if($opt{write_head}){
+        $opt{write_sub}->($opt{write_head}) if ( exists $opt{write_sub} ) ;
+        push @data, $opt{write_head} if ( $opt{return_arrayref} );
+    }
+
     my $row_deal_sub = sub {
         my ($row) = @_;
 
-        return if ( exists $opt{skip_sub} and $opt{skip_sub}->($row) );
-        my @s = exists $opt{conv_sub} ? $opt{conv_sub}->($row) : $row;
+        return if ( $opt{skip_sub} and $opt{skip_sub}->($row) );
+        my @s = $opt{conv_sub} ? $opt{conv_sub}->($row) : $row;
         return unless (@s);
 
         if ( exists $opt{write_sub} ) {
@@ -92,7 +161,7 @@ sub melt {
 
     my $names = $opt{names};
     if ( !exists $opt{measure} ) {
-        my %selected_id = map { $_ => 1 } @{ $opt{id} };
+        my %selected_id = map { $_ => 1 } get_id_array_value($opt{id});
         my @var_index = grep { !exists $selected_id{$_} } ( 0 .. $#$names );
         $opt{measure} = \@var_index;
     }
@@ -100,13 +169,19 @@ sub melt {
     $opt{conv_sub} = sub {
         my ($r) = @_;
         my @s;
-        my @id_cols = @{$r}[ @{ $opt{id} } ];
+        my @id_cols = get_id_array_value($opt{id}, $r);
         push @s, [ @id_cols, $names->[$_], $r->[$_] ] for @{ $opt{measure} };
         return @s;
     };
 
     $opt{write_filename} = $opt{melt_filename};
     return read_table( $data, %opt );
+}
+
+sub cast_row_cell {
+    my ($r, $x) = @_;
+    my $v =  ref($x) eq 'CODE' ?  $x->($r) : $r->[ $x ];
+    return $v;
 }
 
 sub cast {
@@ -118,17 +193,20 @@ sub cast {
     $opt{conv_sub} = sub {
         my ($r) = @_;
 
-        my $k = join( $opt{sep}, @{$r}[ @{ $opt{id} } ] );
+        my @vr = get_id_array_value($opt{id}, $r);
+        my $k = join( $opt{sep},  @vr );
         if ( !exists $kv{$k} ) {
-            my %temp;
-            $temp{ $opt{names}[$_] } = $r->[$_] for @{ $opt{id} };
+            my @kr = get_id_array_value($opt{id}, $opt{names});
+            my %temp = map {
+                $kr[$_] => $vr[$_]
+            } (0 .. $#kr);
             $kv{$k} = \%temp;
         }
 
-        my $v_name = $r->[ $opt{measure} ] // 'ALL';
+        my $v_name =  cast_row_cell($r, $opt{measure});
         $measure_name{$v_name} = 1;
 
-        my $v =  ref($opt{value}) eq 'CODE' ? $opt{value}->($r) : $r->[ $opt{value} ];
+        my $v =  cast_row_cell($r, $opt{value});
         push @{ $kv{$k}{$v_name} }, $v;
 
         if(exists $opt{reduce_sub}){
@@ -137,22 +215,33 @@ sub cast {
         }
         return;
     };
-    read_table( $data, %opt );
+    read_table( $data, %opt, 
+        return_arrayref => 0, 
+        write_head => 0, 
+    );
+
+    my @measure_name = sort keys(%measure_name);
+    $opt{result_names} ||= [ @{$opt{names}}[@{$opt{id}}], @measure_name ];
+
+    while(my ($k, $r) = each %kv){
+        for my $m_name (@measure_name){
+            my $stat_v = exists $r->{$m_name} ?  $opt{stat_sub}->( $r->{$m_name} ) : 0;
+            $r->{$m_name} = $stat_v;
+        }
+        $r->{$_} //= 0 for(@{ $opt{result_names} });
+    }
 
     read_table(
         \%kv,
         conv_sub => sub {
             my ($r) = @_;
-            for my $m_name ( keys(%measure_name) ) {
-                my $stat_v =
-                  exists $r->{$m_name} ? 
-                    $opt{stat_sub}->( $r->{$m_name} ) : 0;
-                $r->{$m_name} = $stat_v;
-            }
-            $r->{$_} //= 0 for(@{ $opt{result_names} });
-            return [ @{$r}{ @{ $opt{result_names} } } ];
+            my $v = [ @{$r}{ @{ $opt{result_names} } } ];
+            $r = undef;
+            return  $v;
         },
         write_filename => $opt{cast_filename},
+        return_arrayref => $opt{return_arrayref}, 
+        write_head => $opt{write_head} ? $opt{result_names} : 0, 
     );
 }
 
